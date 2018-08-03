@@ -5323,6 +5323,66 @@ class PyCdlib(object):
         self._rr_moved_name = encoded_name
         self._rr_moved_rr_name = encoded_rr_name
 
+    def walk(self, **kwargs):
+        if not self._initialized:
+            raise pycdlibexception.PyCdlibInvalidInput('This object is not yet initialized; call either open() or new() to create an ISO')
+
+        iso_path = None
+        rr_path = None
+        joliet_path = None
+        udf_path = None
+        num_paths = 0
+        for key in kwargs:
+            if key == 'joliet_path':
+                joliet_path = kwargs[key]
+            elif key == 'rr_path':
+                rr_path = kwargs[key]
+            elif key == 'iso_path':
+                iso_path = kwargs[key]
+            elif key == 'udf_path':
+                udf_path = kwargs[key]
+            else:
+                raise pycdlibexception.PyCdlibInvalidInput("Invalid keyword, must be one of 'iso_path', 'rr_path', 'joliet_path', or 'udf_path'")
+            if kwargs[key] is not None:
+                num_paths += 1
+
+        if num_paths != 1:
+            raise pycdlibexception.PyCdlibInvalidInput("Must specify one, and only one of 'iso_path', 'rr_path', 'joliet_path', or 'udf_path'")
+
+        if joliet_path is not None:
+            joliet_path = self._normalize_joliet_path(kwargs['joliet_path'])
+            rec = self._find_joliet_record(joliet_path)
+        elif udf_path is not None:
+            if self.udf_root is None:
+                raise pycdlibexception.PyCdlibInvalidInput('Can only specify a UDF path for a UDF ISO')
+            (ident_unused, rec) = self._find_udf_record(utils.normpath(kwargs['udf_path']))
+            if rec is None:
+                raise pycdlibexception.PyCdlibInvalidInput('Cannot get entry for empty UDF File Entry')
+        elif rr_path is not None:
+            if self.rock_ridge is None:
+                raise pycdlibexception.PyCdlibInvalidInput('Cannot fetch a rr_path from a non-Rock Ridge ISO')
+            rec = self._find_rr_record(utils.normpath(kwargs['rr_path']))
+        else:
+            rec = self._find_iso_record(utils.normpath(kwargs['iso_path']))
+
+        dirs = collections.deque([rec])
+        while dirs:
+            dir_record = dirs.popleft()
+
+            dirlist = []
+            filelist = []
+            for child in dir_record.children:
+                if child.is_dot() or child.is_dotdot():
+                    continue
+
+                if child.is_dir():
+                    dirlist.append(child)
+                    dirs.append((child))
+                else:
+                    filelist.append(child)
+
+            yield dir_record, dirlist, filelist
+
     def close(self):
         '''
         Close the PyCdlib object, and re-initialize the object to the defaults.
